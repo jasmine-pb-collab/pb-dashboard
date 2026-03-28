@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Productboard — Strategic Alignment Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; }
+  .setup-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .setup-card { background: #fff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 36px; max-width: 520px; width: 100%; text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,0.04); }
+  .setup-card h1 { font-size: 22px; font-weight: 700; margin: 8px 0 4px; }
+  .sub { color: #64748b; font-size: 14px; margin-bottom: 24px; }
+  .form-group { text-align: left; margin-bottom: 16px; }
+  .form-group label { font-size: 13px; font-weight: 600; color: #475569; display: block; margin-bottom: 6px; }
+  .form-group input { width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; outline: none; }
+  .form-group input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+  .hint { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+  .btn-primary { width: 100%; padding: 10px; background: #6366f1; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .btn-primary:hover { background: #4f46e5; }
+  .btn-primary:disabled { background: #94a3b8; cursor: wait; }
+  .error-box { background: #fee2e2; color: #991b1b; padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+  .dash { padding: 24px; max-width: 960px; margin: 0 auto; }
+  .dash-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  .dash-header h1 { font-size: 22px; font-weight: 700; }
+  .btn-sm { padding: 6px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; font-size: 13px; cursor: pointer; color: #64748b; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .stat-card { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 14px; text-align: center; }
+  .stat-card .val { font-size: 26px; font-weight: 700; }
+  .stat-card .lbl { font-size: 12px; color: #64748b; }
+  .filters { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .filters select, .filters input { padding: 6px 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 13px; outline: none; background: #fff; }
+  .filters input { flex: 1; min-width: 200px; }
+  .card { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 20px; margin-bottom: 16px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; text-transform: capitalize; white-space: nowrap; }
+  .badge.on-track, .badge.done, .badge.shipped { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+  .badge.at-risk, .badge.in-progress { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+  .badge.off-track { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+  .badge.planned, .badge.upcoming { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+  .badge.candidate { background: #e0e7ff; color: #3730a3; border: 1px solid #a5b4fc; }
+  .badge.default { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+  .loading-wrap { text-align: center; padding: 60px 20px; }
+  .spinner { width: 40px; height: 40px; border: 4px solid #e2e8f0; border-top-color: #6366f1; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-wrap p { color: #64748b; font-size: 14px; }
+  .loading-detail { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+var COLORS = ["#6366f1","#8b5cf6","#ec4899","#f59e0b","#10b981","#06b6d4"];
+var token = "";
+var appData = null;
+var mode = "setup";
+var error = null;
+var loadMsg = "";
+var filterInit = "all";
+var filterStatus = "all";
+var search = "";
+var expandedInits = {};
+var expandedFeats = {};
+
+function badgeClass(s) {
+  var k = (s||"").toLowerCase().replace(/\s+/g,"-");
+  var v = ["on-track","at-risk","off-track","done","shipped","in-progress","planned","candidate","upcoming"];
+  return v.indexOf(k) >= 0 ? k : "default";
+}
+function badge(s) { return '<span class="badge '+badgeClass(s)+'">'+(s||"No status")+'</span>'; }
+
+async function api(path) {
+  var r = await fetch("/pb" + path, { headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" } });
+  if (!r.ok) throw new Error("API " + r.status + ": " + r.statusText);
+  return await r.json();
+}
+
+async function loadData() {
+  loadMsg = "Fetching core data..."; render();
+  var results = await Promise.all([
+    api("/initiatives"),
+    api("/objectives"),
+    api("/key-results"),
+    api("/features").catch(function() { return {data:[]}; }),
+    api("/feature-statuses").catch(function() { return {data:[]}; })
+  ]);
+  var rawInits = results[0].data || [];
+  var rawObjs = results[1].data || [];
+  var rawKRs = results[2].data || [];
+  var rawFeats = results[3].data || [];
+  var rawStatuses = results[4].data || [];
+
+  var statusMap = {};
+  rawStatuses.forEach(function(s) { statusMap[s.id] = s.name; });
+
+  var initiatives = rawInits.map(function(i) {
+    return { id: i.id, name: i.name, description: i.description || "", status: (i.status && i.status.name) || "" };
+  });
+  var objectives = rawObjs.map(function(o) { return { id: o.id, name: o.name }; });
+  var keyResults = rawKRs.map(function(k) {
+    return { id: k.id, name: k.name, objectiveId: (k.parent && k.parent.id) || null, status: (k.status && k.status.name) || "" };
+  });
+  var features = rawFeats.map(function(f) {
+    var st = "Unknown";
+    if (f.status && f.status.name) st = f.status.name;
+    else if (f.status && f.status.id && statusMap[f.status.id]) st = statusMap[f.status.id];
+    return { id: f.id, name: f.name, status: st, owner: (f.owner && (f.owner.name || f.owner.email)) || "" };
+  });
+
+  loadMsg = "Resolving initiative → objective links..."; render();
+  var initObjMap = {};
+  for (var i = 0; i < initiatives.length; i++) {
+    try {
+      var lr = await api("/initiatives/" + initiatives[i].id + "/links/objectives");
+      initObjMap[initiatives[i].id] = (lr.data || []).map(function(x) { return x.id; });
+    } catch(e) { initObjMap[initiatives[i].id] = []; }
+  }
+
+  loadMsg = "Resolving objective → feature links..."; render();
+  var objFeatMap = {};
+  for (var j = 0; j < objectives.length; j++) {
+    try {
+      var fr = await api("/objectives/" + objectives[j].id + "/links/features");
+      objFeatMap[objectives[j].id] = (fr.data || []).map(function(x) { return x.id; });
+    } catch(e) { objFeatMap[objectives[j].id] = []; }
+  }
+
+  var featById = {};
+  features.forEach(function(f) { featById[f.id] = f; });
+
+  var objById = {};
+  objectives.forEach(function(o) {
+    var featIds = objFeatMap[o.id] || [];
+    var feats = featIds.map(function(fid) { return featById[fid]; }).filter(Boolean);
+    objById[o.id] = { id: o.id, name: o.name, features: feats };
+  });
+
+  var krData = keyResults.map(function(kr) {
+    var obj = kr.objectiveId ? objById[kr.objectiveId] : null;
+    return { id: kr.id, name: kr.name, status: kr.status, objectiveName: obj ? obj.name : "", features: obj ? obj.features : [] };
+  });
+
+  var initData = initiatives.map(function(init) {
+    var objIds = initObjMap[init.id] || [];
+    var initKRs = krData.filter(function(kr) {
+      var origKR = keyResults.find(function(k) { return k.id === kr.id; });
+      return origKR && objIds.indexOf(origKR.objectiveId) >= 0;
+    });
+    return { id: init.id, name: init.name, description: init.description, status: init.status, keyResults: initKRs };
+  });
+
+  appData = { initiatives: initData, totalObjs: objectives.length, totalKRs: keyResults.length, totalFeats: features.length };
+}
+
+function render() {
+  var root = document.getElementById("root");
+  if (mode === "setup") { root.innerHTML = renderSetup(); bindSetup(); }
+  else if (mode === "loading") { root.innerHTML = '<div class="loading-wrap"><div class="spinner"></div><p>Connecting to Productboard...</p><p class="loading-detail">' + loadMsg + '</p></div>'; }
+  else if (mode === "dash") { root.innerHTML = renderDash(); bindDash(); }
+}
+
+function renderSetup() {
+  return '<div class="setup-wrap"><div class="setup-card"><div style="font-size:40px;margin-bottom:8px">📊</div><h1>Strategic Alignment Dashboard</h1><p class="sub">Initiatives → Key Results → Features</p><div class="form-group"><label>Productboard API Token</label><input type="password" id="tok" placeholder="Paste your token here..." /><p class="hint">In Productboard: Settings → Integrations → Public API</p></div>' + (error ? '<div class="error-box">' + error + '</div>' : '') + '<button class="btn-primary" id="btn-go">Connect & Load</button></div></div>';
+}
+
+function bindSetup() {
+  document.getElementById("tok").addEventListener("keydown", function(e) { if (e.key === "Enter") doConnect(); });
+  document.getElementById("btn-go").addEventListener("click", doConnect);
+}
+
+async function doConnect() {
+  var inp = document.getElementById("tok");
+  token = (inp && inp.value || "").trim();
+  if (!token) return;
+  error = null; mode = "loading"; render();
+  try {
+    await loadData();
+    appData.initiatives.forEach(function(i) { expandedInits[i.id] = true; });
+    mode = "dash";
+  } catch(e) {
+    console.error("Load error:", e);
+    error = e.message;
+    mode = "setup";
+  }
+  render();
+}
+
+function renderDash() {
+  var d = appData;
+  var inits = d.initiatives.slice();
+  if (filterInit !== "all") inits = inits.filter(function(i) { return i.id === filterInit; });
+  if (filterStatus !== "all") inits = inits.filter(function(i) { return badgeClass(i.status) === filterStatus; });
+  if (search.trim()) {
+    var q = search.toLowerCase();
+    inits = inits.filter(function(i) {
+      if (i.name.toLowerCase().indexOf(q) >= 0) return true;
+      return i.keyResults.some(function(kr) {
+        return kr.name.toLowerCase().indexOf(q) >= 0 || kr.features.some(function(f) { return f.name.toLowerCase().indexOf(q) >= 0; });
+      });
+    });
+  }
+
+  var h = '<div class="dash"><div class="dash-header"><div><h1>📊 Strategic Alignment</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">Live from Productboard · Initiatives → Key Results → Features</p></div><button class="btn-sm" id="btn-back">Disconnect</button></div>';
+  h += '<div class="stats">';
+  h += '<div class="stat-card"><div class="val" style="color:#6366f1">' + d.initiatives.length + '</div><div class="lbl">Initiatives</div></div>';
+  h += '<div class="stat-card"><div class="val" style="color:#8b5cf6">' + d.totalObjs + '</div><div class="lbl">Objectives</div></div>';
+  h += '<div class="stat-card"><div class="val" style="color:#a78bfa">' + d.totalKRs + '</div><div class="lbl">Key Results</div></div>';
+  h += '<div class="stat-card"><div class="val" style="color:#ec4899">' + d.totalFeats + '</div><div class="lbl">Features</div></div>';
+  h += '</div>';
+  h += '<div class="filters"><select id="fi"><option value="all">All Initiatives</option>';
+  d.initiatives.forEach(function(i) { h += '<option value="' + i.id + '"' + (filterInit === i.id ? ' selected' : '') + '>' + i.name + '</option>'; });
+  h += '</select><select id="fs"><option value="all">All Statuses</option><option value="on-track">On Track</option><option value="at-risk">At Risk</option><option value="off-track">Off Track</option><option value="upcoming">Upcoming</option></select>';
+  h += '<input id="fq" placeholder="Search initiatives, key results, features..." value="' + search + '" /></div>';
+
+  inits.forEach(function(init, idx) {
+    var color = COLORS[idx % COLORS.length];
+    var exp = expandedInits[init.id] !== false;
+    var totalFeats = []; var seen = {};
+    init.keyResults.forEach(function(kr) { kr.features.forEach(function(f) { if (!seen[f.id]) { seen[f.id] = true; totalFeats.push(f); } }); });
+
+    h += '<div class="card">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer" data-ti="' + init.id + '">';
+    h += '<div style="flex:1"><div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="width:5px;height:28px;border-radius:3px;background:' + color + '"></div><h3 style="font-size:17px;font-weight:700">' + init.name + '</h3>' + badge(init.status) + '</div>';
+    if (init.description) h += '<p style="margin:0 0 0 15px;font-size:13px;color:#64748b">' + init.description + '</p>';
+    h += '<div style="display:flex;gap:16px;margin-left:15px;margin-top:6px">';
+    h += '<span style="font-size:11px;color:#94a3b8">' + init.keyResults.length + ' Key Result' + (init.keyResults.length !== 1 ? 's' : '') + '</span>';
+    h += '<span style="font-size:11px;color:#94a3b8">' + totalFeats.length + ' Feature' + (totalFeats.length !== 1 ? 's' : '') + '</span>';
+    h += '</div></div>';
+    h += '<span style="font-size:18px;color:#94a3b8;transform:rotate(' + (exp ? 180 : 0) + 'deg);transition:transform 0.2s">▾</span>';
+    h += '</div>';
+
+    if (exp) {
+      h += '<div style="margin-top:18px;margin-left:15px">';
+      if (init.keyResults.length === 0) h += '<div style="font-size:13px;color:#cbd5e1;font-style:italic">No key results linked to this initiative</div>';
+      init.keyResults.forEach(function(kr) {
+        var fExp = expandedFeats[kr.id];
+        h += '<div style="margin-bottom:14px;padding-left:18px;border-left:2px solid ' + color + '44">';
+        h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span style="font-size:14px">🔑</span><span style="font-size:14px;font-weight:600;color:#1e293b;flex:1">' + kr.name + '</span>' + badge(kr.status) + '</div>';
+        if (kr.objectiveName) h += '<div style="font-size:11px;color:#94a3b8;margin-left:24px;margin-bottom:6px">🎯 Objective: ' + kr.objectiveName + '</div>';
+        if (kr.features.length > 0) {
+          var doneF = kr.features.filter(function(f) { return ["done","shipped"].indexOf(f.status.toLowerCase()) >= 0; }).length;
+          h += '<button style="background:none;border:none;cursor:pointer;font-size:12px;font-weight:600;padding:2px 0;display:flex;align-items:center;gap:4px;margin-left:24px;color:' + color + '" data-tf="' + kr.id + '"><span style="display:inline-block;transform:rotate(' + (fExp ? 90 : 0) + 'deg);transition:transform 0.15s">▸</span> ' + kr.features.length + ' Feature' + (kr.features.length !== 1 ? 's' : '') + ' (' + doneF + ' done)</button>';
+          if (fExp) {
+            h += '<div style="margin-top:4px;margin-left:24px">';
+            kr.features.forEach(function(f) {
+              h += '<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;background:#fafbfc;border-radius:6px;font-size:12px;margin-bottom:3px">';
+              h += '<span style="color:#94a3b8">⚙️</span><span style="flex:1;color:#334155">' + f.name + '</span>';
+              if (f.owner) h += '<span style="color:#94a3b8;font-size:11px">' + f.owner + '</span>';
+              h += badge(f.status) + '</div>';
+            });
+            h += '</div>';
+          }
+        } else {
+          h += '<div style="font-size:12px;color:#cbd5e1;font-style:italic;margin-left:24px">No features linked</div>';
+        }
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
+  });
+
+  if (inits.length === 0) h += '<div class="card" style="text-align:center;padding:40px;color:#94a3b8">No initiatives match your filters.</div>';
+  h += '</div>';
+  return h;
+}
+
+function bindDash() {
+  document.getElementById("btn-back").addEventListener("click", function() { mode = "setup"; appData = null; error = null; render(); });
+  document.getElementById("fi").addEventListener("change", function(e) { filterInit = e.target.value; render(); });
+  document.getElementById("fs").addEventListener("change", function(e) { filterStatus = e.target.value; render(); });
+  document.getElementById("fq").addEventListener("input", function(e) { search = e.target.value; render(); });
+  document.querySelectorAll("[data-ti]").forEach(function(el) {
+    el.addEventListener("click", function() { var id = el.getAttribute("data-ti"); expandedInits[id] = expandedInits[id] === false; render(); });
+  });
+  document.querySelectorAll("[data-tf]").forEach(function(el) {
+    el.addEventListener("click", function(e) { e.stopPropagation(); var id = el.getAttribute("data-tf"); expandedFeats[id] = !expandedFeats[id]; render(); });
+  });
+}
+
+render();
+</script>
+</body>
+</html>
